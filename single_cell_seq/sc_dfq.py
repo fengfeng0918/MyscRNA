@@ -164,27 +164,45 @@ def sc_qc_scatter_plot(adata,x,y,color=None,save="00",**kwds):
         print("adata.obs.columns没有该{0}or{1}数据列".format(x,y))
 
 
-def sc_top_gene_plot():
-    sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
+def sc_top_gene_plot(sample_strings):
+
+    def _top_plot(data,name):
+        """
+        ploting.
+        :param data: pd.DataFrame
+        :param name: save filename
+        :return:
+        """
+        fig, ax = plt.subplots()
+        ax.boxplot(data, vert=False, showfliers=True, labels=hh.index,
+                   flierprops={"markersize": 2, "markerfacecolor": "red", "markeredgecolor": "red"})
+        ax.set_title(name)
+        ax.set_xlabel("percent(%) of total counts")
+        fig.savefig("figures/{0}_top20.png".format(name))
+        fig.savefig("figures/{0}_top20.pdf".format(name))
+        print("{0}_top20  has been saved!".format(name))
+        plt.close()
+
+    # sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
     # 生成所有数据集
     aa = pd.DataFrame(adata.X)
     aa.index = adata.obs.index
     aa.columns = adata.var_names
 
+    # select top20 genes for each sample
     for sample in sample_strings:
         # 生成样本的数据集 如：Duo_M2
         dd = aa[adata.obs["sample"] == sample].T
         dd = dd/dd.sum(0)*100
-        hh = dd.loc[(dd.T.describe().loc["50%",:]).sort_values()[-20:].index, :]  # 基因counts比例中位数最高
+        hh = dd.loc[dd.T.quantile([0.5]).T.sort_values(by=0.5)[-20:].index, :]  # 基因counts比例中位数最高
+        _top_plot(hh, sample)
 
-        fig, ax = plt.subplots()
-        ax.boxplot(hh, vert=False,showfliers=True,labels=hh.index,flierprops={"markersize":2,"markerfacecolor":"red","markeredgecolor":"red"})
-        ax.set_title(sample)
-        ax.set_xlabel("percent(%) of total counts")
-        fig.savefig("figures/{0}_top20.png".format(sample))
-
+    # select top20 genes for all sample
+    hh = aa.T.loc[aa.quantile([0.5]).T.sort_values(by=0.5)[-20:].index, :]
+    _top_plot(hh, "all")
 
 
+sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
 
 adata = get_raw_data()
 adata = pre_qc(adata)
@@ -193,6 +211,7 @@ sc_qc_violin_plot("mt_frac", group='sample', **{"size":1, "show":False})
 sc_qc_scatter_plot(adata, 'n_counts', 'n_genes', color='mt_frac',save=1)
 sc_qc_scatter_plot(adata[adata.obs['n_counts']<10000], 'n_counts', 'n_genes', color='mt_frac',save=2)
 
+sc_top_gene_plot(sample_strings)
 
 # Annotate the data sets
 print(adata.obs['region'].value_counts())
