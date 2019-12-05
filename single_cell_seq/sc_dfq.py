@@ -165,29 +165,24 @@ def sc_qc_scatter_plot(adata,x,y,color=None,save="00",**kwds):
 
 
 def sc_top_gene_plot():
+    sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
+    # 生成所有数据集
     aa = pd.DataFrame(adata.X)
     aa.index = adata.obs.index
     aa.columns = adata.var_names
 
-    sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
-    cc = aa[adata.obs["sample"] == "Duo_M2"].T
-    gg = cc.loc[cc.sum(1).sort_values()[-20:].index,:]  # 总数量最多
-    plt.boxplot(gg, vert=False, showfliers=False, labels=gg.index)
+    for sample in sample_strings:
+        # 生成样本的数据集 如：Duo_M2
+        dd = aa[adata.obs["sample"] == sample].T
+        dd = dd/dd.sum(0)*100
+        hh = dd.loc[(dd.T.describe().loc["50%",:]).sort_values()[-20:].index, :]  # 基因counts比例中位数最高
 
-    dd = aa[adata.obs["sample"] == "Duo_M2"].T
-    dd = dd/dd.sum(0)
-    hh = dd.loc[(dd.T.describe().loc["50%",:]).sort_values()[-20:].index, :]  # 基因counts比例中位数最高
-    fig5, ax = plt.subplots()
-    ax.boxplot(hh, vert=False,showfliers=True,labels=hh.index,flierprops={"markersize":2,"markerfacecolor":"red","markeredgecolor":"red"})
-    ax.set_title("Duo_M2")
-    ax.set_xlabel("percent of total counts")
-    plt.show()
+        fig, ax = plt.subplots()
+        ax.boxplot(hh, vert=False,showfliers=True,labels=hh.index,flierprops={"markersize":2,"markerfacecolor":"red","markeredgecolor":"red"})
+        ax.set_title(sample)
+        ax.set_xlabel("percent(%) of total counts")
+        fig.savefig("figures/{0}_top20.png".format(sample))
 
-
-    # all
-    gg = aa.T.loc[aa.T.sum(1).sort_values()[-20:].index, :]
-    plt.boxplot(gg, vert=False,showfliers=False,labels=gg.index)
-    plt.show()
 
 
 
