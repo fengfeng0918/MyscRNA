@@ -7,18 +7,19 @@ Author: dfq
 
 import scanpy as sc
 import numpy as np
-import scipy as sp
+import seaborn as sb
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import rcParams
-from matplotlib import colors
-import seaborn as sb
-from gprofiler import gprofiler
 
-import rpy2.rinterface_lib.callbacks
-import logging
-from rpy2.robjects import pandas2ri
-import anndata2ri
+# import scipy as sp
+# from matplotlib import rcParams
+# from matplotlib import colors
+# from gprofiler import gprofiler
+#
+# import rpy2.rinterface_lib.callbacks
+# import logging
+# from rpy2.robjects import pandas2ri
+# import anndata2ri
 
 # 导入R包
 """
@@ -147,14 +148,12 @@ def pre_qc(adata):
     adata.obs['mt_frac'] = adata.X[:, mt_gene_mask].sum(1) / adata.obs['n_counts']  # 计算每个细胞中线粒体基因比例
     return adata
 
-
-def sc_qc_violin_plot(keys, group='sample', **kwds):
+def sc_qc_violin_plot(adata, keys, group='sample', **kwds):
     if keys in adata.obs.columns:
         sc.pl.violin(adata, keys, groupby=group, cut=0, save="_{0}.png".format(keys), show=False, **kwds)
         sc.pl.violin(adata, keys, groupby=group, cut=0, save="_{0}.pdf".format(keys), show=False, **kwds)
     else:
         print("adata.obs.columns没有该{0}数据列".format(keys))
-
 
 def sc_qc_scatter_plot(adata,x,y,color=None,save="00",**kwds):
     if (x in adata.obs.columns) and (y in adata.obs.columns):
@@ -163,8 +162,15 @@ def sc_qc_scatter_plot(adata,x,y,color=None,save="00",**kwds):
     else:
         print("adata.obs.columns没有该{0}or{1}数据列".format(x,y))
 
+def sc_qc_dist_plot(data,keys,*arg,**kwargs):
+    fig,ax = plt.subplots()
+    sb.distplot(data,*arg,**kwargs)
+    fig.savefig("figures/{}.png".format(keys))
+    fig.savefig("figures/{}.pdf".format(keys))
+    print("figures/{} has been ploted!".format(keys))
+    plt.close()
 
-def sc_top_gene_plot(sample_strings):
+def sc_top_gene_plot(adata,sample_strings):
 
     def _top_plot(data,name):
         """
@@ -201,82 +207,71 @@ def sc_top_gene_plot(sample_strings):
     hh = aa.T.loc[aa.quantile([0.5]).T.sort_values(by=0.5)[-20:].index, :]
     _top_plot(hh, "all")
 
+def sc_qc_filter(adata, **kwargs):
+    before_cells = adata.shape[0]
+    print("Total number of cells: [{0}]".format(before_cells))
+    # Filter cells according to identified QC thresholds:
+    for key,value in kwargs.items():
+        if key == "min_counts":
+            adata = adata[adata.obs['n_counts'] > value]
+        elif key == "min_genes":
+            adata = adata[adata.obs['n_genes'] > value]
+        elif key == "max_counts":
+            adata = adata[adata.obs['n_counts'] < value]
+        elif key == "max_genes":
+            adata = adata[adata.obs['n_genes'] < value]
+        elif key =="mt_frac":
+            adata = adata[adata.obs['mt_frac'] < value]
+        else:
+            print("Have nothing to do with {}={}.".format(key,value))
+        after_cells = adata.shape[0]
+        gap = before_cells - after_cells
+        before_cells = after_cells
 
-sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
+        print("Number of cells after {0} filter:[{1}]\tand [{2}] cells filtered out"
+              .format(key,after_cells,gap))
+    # sc.pp.filter_cells(adata, max_counts = 40000)
+    # adata = adata[adata.obs['n_counts'] < 40000]
 
-adata = get_raw_data()
-adata = pre_qc(adata)
-sc_qc_violin_plot("n_counts", group='sample', **{"size":1, "log":True, "show":False})
-sc_qc_violin_plot("mt_frac", group='sample', **{"size":1, "show":False})
-sc_qc_scatter_plot(adata, 'n_counts', 'n_genes', color='mt_frac',save=1)
-sc_qc_scatter_plot(adata[adata.obs['n_counts']<10000], 'n_counts', 'n_genes', color='mt_frac',save=2)
+    sc.pp.filter_genes(adata, min_cells=20)
+    return adata
 
-sc_top_gene_plot(sample_strings)
+def main():
+    sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
 
-# Annotate the data sets
-print(adata.obs['region'].value_counts())
-print('')
-print(adata.obs['donor'].value_counts())
-print('')
-print(adata.obs['sample'].value_counts())
+    # 获得数据
+    adata = get_raw_data()
+    adata = pre_qc(adata)
 
+    # qc 画图
+    ## 查看在样本中的分布
+    sc_qc_violin_plot("n_counts", group='sample', **{"size": 1, "log": True, "show": False})
+    sc_qc_violin_plot("mt_frac", group='sample', **{"size": 1, "show": False})
 
+    ## 查看数据之间的关系
+    sc_qc_scatter_plot(adata, 'n_counts', 'n_genes', color='mt_frac', save=1)
+    sc_qc_scatter_plot(adata[adata.obs['n_counts'] < 10000], 'n_counts', 'n_genes', color='mt_frac', save=2)
 
+    ## 质控，确定删选的阈值
+    sc_qc_dist_plot(adata.obs['n_counts'], "n_counts", kde=False, bins=60)
+    sc_qc_dist_plot(adata.obs['n_counts'][adata.obs['n_counts'] < 4000], "n_counts_less_4000", kde=False, bins=60)
+    sc_qc_dist_plot(adata.obs['n_counts'][adata.obs['n_counts'] > 10000], "n_counts_more_10000", kde=False, bins=60)
+    sc_qc_dist_plot(adata.obs['n_genes'], "n_genes", kde=False, bins=60)
+    sc_qc_dist_plot(adata.obs['n_genes'][adata.obs['n_genes'] < 1000], "n_genes_less_1000", kde=False, bins=60)
+    sc_qc_dist_plot(adata.obs['mt_frac'], "mt_frac", kde=False, bins=60)
+    # 以上得到n_counts范围1500~40000；n_genes范围为>700;mt_frac范围为<0.2
 
-# Quality control - plot QC metrics
-#Sample quality plots
-t1 = sc.pl.violin(adata, 'n_counts', groupby='sample', size=2, log=True, cut=0,save="n_counts.png")
-t2 = sc.pl.violin(adata, 'mt_frac', groupby='sample',save="mt_frac.png")
+    adata = sc_qc_filter(adata, min_counts=1500, max_counts=40000, min_genes=700, mt_frac=0.2)
+    sc.pp.filter_genes(adata, min_cells=20)
 
-#Data quality summary plots
-p1 = sc.pl.scatter(adata, 'n_counts', 'n_genes', color='mt_frac',save="_P1.png")
-p2 = sc.pl.scatter(adata[adata.obs['n_counts']<10000], 'n_counts', 'n_genes', color='mt_frac')
+    # select top genes
+    sc_top_gene_plot(adata, sample_strings)
 
-
-#Thresholding decision: counts
-p3 = sb.distplot(adata.obs['n_counts'], kde=False)
-
-p4 = sb.distplot(adata.obs['n_counts'][adata.obs['n_counts']<4000], kde=False, bins=60)
-
-p5 = sb.distplot(adata.obs['n_counts'][adata.obs['n_counts']>10000], kde=False, bins=60)
-
-
-
-
-#Thresholding decision: genes
-p6 = sb.distplot(adata.obs['n_genes'], kde=False, bins=60)
-
-p7 = sb.distplot(adata.obs['n_genes'][adata.obs['n_genes']<1000], kde=False, bins=60)
-
-# Filter cells according to identified QC thresholds:
-print('Total number of cells: {:d}'.format(adata.n_obs))
-
-sc.pp.filter_cells(adata, min_counts = 1500)
-print('Number of cells after min count filter: {:d}'.format(adata.n_obs))
-
-sc.pp.filter_cells(adata, max_counts = 40000)
-print('Number of cells after max count filter: {:d}'.format(adata.n_obs))
-
-adata = adata[adata.obs['mt_frac'] < 0.2]
-print('Number of cells after MT filter: {:d}'.format(adata.n_obs))
-
-sc.pp.filter_cells(adata, min_genes = 700)
-print('Number of cells after gene filter: {:d}'.format(adata.n_obs))
-
-
-#Filter genes:
-print('Total number of genes: {:d}'.format(adata.n_vars))
-
-# Min 20 cells - filters out 0 count genes
-sc.pp.filter_genes(adata, min_cells=20)
-print('Number of genes after cell filter: {:d}'.format(adata.n_vars))
+if __name__ == '__main__':
+    main()
 
 
 
-#Perform a clustering for scran normalization in clusters
-adata_pp = adata.copy()
-sc.pp.normalize_per_cell(adata_pp, counts_per_cell_after=1e6)
-sc.pp.log1p(adata_pp)
-sc.pp.pca(adata_pp, n_comps=15)
-sc.pp.neighbors(adata_pp)
-sc.tl.louvain(adata_pp, key_added='groups', resolution=0.5)
+
+
+
