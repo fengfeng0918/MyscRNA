@@ -4,7 +4,7 @@ Date: 2019年12月2日13:21:21
 Author: dfq
 """
 
-
+import os
 import scanpy as sc
 import numpy as np
 import seaborn as sb
@@ -55,8 +55,8 @@ def get_raw_data():
     # Data files  设置文件的识别类型
     sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
     sample_id_strings = ['3', '4', '5', '6', '7', '8']
-    # file_base = '/home/fdong/data/sc_data/GSM283657'
-    file_base = 'E:\sc_data\GSE92332\GSE92332_RAW\GSM283657\GSM283657'
+    file_base = '/home/fdong/data/sc_data/GSM283657'
+    # file_base = 'E:\sc_data\GSE92332\GSE92332_RAW\GSM283657\GSM283657'
     exp_string = '_Regional_'
     data_file_end = '_matrix.mtx'
     barcode_file_end = '_barcodes.tsv'
@@ -236,38 +236,132 @@ def sc_qc_filter(adata, **kwargs):
     sc.pp.filter_genes(adata, min_cells=20)
     return adata
 
+def get_size_factors(adata_pp):
+
+    # 保存数据 供R分析
+    adata_pp.obs.to_csv("obs.txt",sep="\t",index_label="cell")
+    aa = pd.DataFrame(adata_pp.X)
+    # aa.index = adata_pp.obs.index
+    aa.columns = adata_pp.var_names
+    aa.to_csv("X.txt",sep="\t")
+    os.system("Rscript Normalization.R")
+
+    size_factors= pd.read_csv("size_factors.txt",header=0)
+    return size_factors
+
+def to_visualization(adata):
+    sc.pp.pca(adata, n_comps=50, use_highly_variable=True, svd_solver='arpack')
+    sc.pp.neighbors(adata)
+
+    sc.tl.tsne(adata, n_jobs=12)  # Note n_jobs works for MulticoreTSNE, but not regular implementation)
+    sc.tl.umap(adata)
+    sc.tl.diffmap(adata)
+    sc.tl.draw_graph(adata)
+
+    sc.pl.pca_scatter(adata, color='n_counts',show=False, save="pca.png")
+    sc.pl.tsne(adata, color='n_counts',show=False, save="tsne.png")
+    sc.pl.umap(adata, color='n_counts',show=False, save="umap.png")
+    sc.pl.diffmap(adata, color='n_counts', components=['1,2', '1,3'],show=False, save="diffmap.png")
+    sc.pl.draw_graph(adata, color='n_counts',show=False, save="draw_graph.png")
+
+def cell_cycle_scoring(adata,cc_genes_file):
+    # Score cell cycle and visualize the effect:
+    cc_genes = pd.read_table(cc_genes_file, delimiter='\t')
+    s_genes = cc_genes['S'].dropna()
+    g2m_genes = cc_genes['G2.M'].dropna()
+
+    s_genes_mm = [gene.lower().capitalize() for gene in s_genes]
+    g2m_genes_mm = [gene.lower().capitalize() for gene in g2m_genes]
+
+    s_genes_mm_ens = adata.var_names[np.in1d(adata.var_names, s_genes_mm)]
+    g2m_genes_mm_ens = adata.var_names[np.in1d(adata.var_names, g2m_genes_mm)]
+
+    sc.tl.score_genes_cell_cycle(adata, s_genes=s_genes_mm_ens, g2m_genes=g2m_genes_mm_ens)
+
+    sc.pl.umap(adata, color=['S_score', 'G2M_score'], use_raw=False,show=False,save="S_score_G2M_score.png")
+    sc.pl.umap(adata, color='phase', use_raw=False,show=False,save="cell_cycle_phase.png")
+
+
 def main():
     sample_strings = ['Duo_M1', 'Duo_M2', 'Jej_M1', 'Jej_M2', 'Il_M1', 'Il_M2']
+    cc_genes_file = '~/data/Macosko_cell_cycle_genes.txt'
+    # cc_genes_file = 'E:\\sc_data\\Macosko_cell_cycle_genes.txt'
 
     # 获得数据
     adata = get_raw_data()
     adata = pre_qc(adata)
-
-    # qc 画图
-    ## 查看在样本中的分布
-    sc_qc_violin_plot("n_counts", group='sample', **{"size": 1, "log": True, "show": False})
-    sc_qc_violin_plot("mt_frac", group='sample', **{"size": 1, "show": False})
-
-    ## 查看数据之间的关系
-    sc_qc_scatter_plot(adata, 'n_counts', 'n_genes', color='mt_frac', save=1)
-    sc_qc_scatter_plot(adata[adata.obs['n_counts'] < 10000], 'n_counts', 'n_genes', color='mt_frac', save=2)
-
-    ## 质控，确定删选的阈值
-    sc_qc_dist_plot(adata.obs['n_counts'], "n_counts", kde=False, bins=60)
-    sc_qc_dist_plot(adata.obs['n_counts'][adata.obs['n_counts'] < 4000], "n_counts_less_4000", kde=False, bins=60)
-    sc_qc_dist_plot(adata.obs['n_counts'][adata.obs['n_counts'] > 10000], "n_counts_more_10000", kde=False, bins=60)
-    sc_qc_dist_plot(adata.obs['n_genes'], "n_genes", kde=False, bins=60)
-    sc_qc_dist_plot(adata.obs['n_genes'][adata.obs['n_genes'] < 1000], "n_genes_less_1000", kde=False, bins=60)
-    sc_qc_dist_plot(adata.obs['mt_frac'], "mt_frac", kde=False, bins=60)
-    # 以上得到n_counts范围1500~40000；n_genes范围为>700;mt_frac范围为<0.2
-
+    #
+    # # qc 画图
+    # ## 查看在样本中的分布
+    # sc_qc_violin_plot("n_counts", group='sample', **{"size": 1, "log": True, "show": False})
+    # sc_qc_violin_plot("mt_frac", group='sample', **{"size": 1, "show": False})
+    #
+    # ## 查看数据之间的关系
+    # sc_qc_scatter_plot(adata, 'n_counts', 'n_genes', color='mt_frac', save=1)
+    # sc_qc_scatter_plot(adata[adata.obs['n_counts'] < 10000], 'n_counts', 'n_genes', color='mt_frac', save=2)
+    #
+    # ## 质控，确定删选的阈值
+    # sc_qc_dist_plot(adata.obs['n_counts'], "n_counts", kde=False, bins=60)
+    # sc_qc_dist_plot(adata.obs['n_counts'][adata.obs['n_counts'] < 4000], "n_counts_less_4000", kde=False, bins=60)
+    # sc_qc_dist_plot(adata.obs['n_counts'][adata.obs['n_counts'] > 10000], "n_counts_more_10000", kde=False, bins=60)
+    # sc_qc_dist_plot(adata.obs['n_genes'], "n_genes", kde=False, bins=60)
+    # sc_qc_dist_plot(adata.obs['n_genes'][adata.obs['n_genes'] < 1000], "n_genes_less_1000", kde=False, bins=60)
+    # sc_qc_dist_plot(adata.obs['mt_frac'], "mt_frac", kde=False, bins=60)
+    # # 以上得到n_counts范围1500~40000；n_genes范围为>700;mt_frac范围为<0.2
+    #
+    # filter cells
     adata = sc_qc_filter(adata, min_counts=1500, max_counts=40000, min_genes=700, mt_frac=0.2)
+    #
+    # Filter genes:
+    print('Total number of genes: {:d}'.format(adata.n_vars))
+    # Min 20 cells - filters out 0 count genes
     sc.pp.filter_genes(adata, min_cells=20)
+    print('Number of genes after cell filter: {:d}'.format(adata.n_vars))
+    #
+    #
+    # # select top genes
+    # sc_top_gene_plot(adata, sample_strings)
 
-    # select top genes
-    sc_top_gene_plot(adata, sample_strings)
+
+    # normalization
+
+    # TODO 解释以下代码意义
+    adata_pp = adata.copy()
+    sc.pp.normalize_per_cell(adata_pp, counts_per_cell_after=1e6)
+    sc.pp.log1p(adata_pp)
+    sc.pp.pca(adata_pp, n_comps=15)
+    sc.pp.neighbors(adata_pp)
+    sc.tl.louvain(adata_pp, key_added='groups', resolution=0.5)
+    # Normalization 得到size_factors
+    size_factors = get_size_factors(adata_pp)
+    del adata_pp
+    size_factors.index = adata.obs.index
+    adata.obs["size_factors"] = size_factors
+
+    sc_qc_scatter_plot(adata, 'size_factors', 'n_counts',save="size_factors_n_counts")
+    sc_qc_scatter_plot(adata, 'size_factors', 'n_genes',save="size_factors_n_genes")
+    sc_qc_dist_plot(adata.obs['size_factors'],'size_factors', bins=50, kde=False)
+
+    # Keep the count data in a counts layer
+    adata.layers["counts"] = adata.X.copy()
+    # Normalize adata
+    adata.X /= adata.obs['size_factors'].values[:, None]
+    sc.pp.log1p(adata)
+
+    # Batch Correction
+    # sc.pp.combat(adata, key='sample')
+
+    # Highly Variable Genes
+    sc.pp.highly_variable_genes(adata, flavor='cell_ranger', n_top_genes=4000)
+    print('\n', 'Number of highly variable genes: {:d}'.format(np.sum(adata.var['highly_variable'])))
+    sc.pl.highly_variable_genes(adata,show=False, save="highly_variable_genes.png")
+
+
+
 
 if __name__ == '__main__':
+    import warnings
+    warnings.filterwarnings('ignore')
     main()
 
 
