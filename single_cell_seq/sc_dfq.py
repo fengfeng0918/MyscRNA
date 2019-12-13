@@ -338,9 +338,7 @@ def mark_geenes(adata):
 
     #Early enterocyte marker - Arg2
     sc.pl.umap(adata, color='Arg2', use_raw=False, color_map=mymap)
-
     sc.pl.violin(adata, groupby='louvain_r0.5', keys='Arg2', use_raw=False)
-
     sc.pl.diffmap(adata, components=['6,9'], color='Arg2', use_raw=False, color_map=mymap)
     sc.pl.diffmap(adata, components=['6,9'], color='louvain_r0.5')
 
@@ -361,10 +359,86 @@ def mark_geenes(adata):
     # Categories to rename
     adata.obs['louvain_r0.5'].cat.categories
     adata.rename_categories('louvain_r0.5', ['TA', 'EP (early)', 'Stem', 'Goblet', 'EP (stress)', 'Enterocyte', 'Paneth', 'Enteroendocrine', 'Tuft'])
-
     adata.obs['louvain_r0.5'].value_counts()
-
     sc.pl.umap(adata, color='louvain_r0.5', size=15, legend_loc='on data')
+
+
+def Subclustering(adata):
+    # Subcluster enterocytes
+    sc.tl.louvain(adata, restrict_to=('louvain_r0.5', ['Enterocyte']), resolution=0.2,key_added='louvain_r0.5_entero_sub')
+
+    # Show the new clustering
+    if 'louvain_r0.5_entero_sub_colors' in adata.uns:
+        del adata.uns['louvain_r0.5_entero_sub_colors']
+
+    sc.pl.umap(adata, color='louvain_r0.5_entero_sub', palette=sc.pl.palettes.godsnot_64)
+    sc.pl.umap(adata, color='region', palette=sc.pl.palettes.godsnot_64)
+
+    sc.tl.rank_genes_groups(adata, groupby='louvain_r0.5_entero_sub', key_added='rank_genes_r0.5_entero_sub')
+    # Plot the new marker genes
+    sc.pl.rank_genes_groups(adata, key='rank_genes_r0.5_entero_sub',groups=['Enterocyte,0', 'Enterocyte,1', 'Enterocyte,2'], fontsize=12)
+
+    entero_clusts = [clust for clust in adata.obs['louvain_r0.5_entero_sub'].cat.categories if clust.startswith('Enterocyte')]
+    for clust in entero_clusts:
+        sc.pl.rank_genes_groups_violin(adata, use_raw=True, key='rank_genes_r0.5_entero_sub', groups=[clust], gene_names=adata.uns['rank_genes_r0.5_entero_sub']['names'][clust][90:100])
+
+
+    #Get the new marker genes
+    sc.tl.rank_genes_groups(adata, groupby='louvain_r0.5_entero_sub', key_added='rank_genes_r0.5_entero_sub')
+
+    # Plot the new marker genes
+    sc.pl.rank_genes_groups(adata, key='rank_genes_r0.5_entero_sub', groups=['Enterocyte,0', 'Enterocyte,1', 'Enterocyte,2'], fontsize=12)
+
+    entero_clusts = [clust for clust in adata.obs['louvain_r0.5_entero_sub'].cat.categories if clust.startswith('Enterocyte')]
+    for clust in entero_clusts:
+        sc.pl.rank_genes_groups_violin(adata, use_raw=True, key='rank_genes_r0.5_entero_sub', groups=[clust], gene_names=adata.uns['rank_genes_r0.5_entero_sub']['names'][clust][90:100])
+
+    #Subset marker gene dictionary to only check for enterocyte markers
+    # marker_genes_entero = {k: marker_genes[k] for k in marker_genes if k.startswith('Enterocyte')}
+    #
+    # sc.tl.marker_gene_overlap(adata, marker_genes_entero, key='rank_genes_r0.5_entero_sub', normalize='reference')
+
+    #Check enterocyte marker expression
+    sc.pl.violin(adata[adata.obs['louvain_r0.5']=='Enterocyte'], groupby='louvain_r0.5_entero_sub', keys='Enterocyte_marker_expr')
+
+    # Visualize some enterocyte markers
+    entero_genes = ['Alpi', 'Apoa1', 'Apoa4', 'Fabp1', 'Arg2']
+    sc.pl.umap(adata, color=entero_genes[:3], title=entero_genes[:3], color_map=mymap)
+    sc.pl.umap(adata, color=entero_genes[3:], title=entero_genes[3:], color_map=mymap)
+
+    sc.pl.diffmap(adata, color='louvain_r0.5_entero_sub', components='3,7')
+
+def Compositional_analysis(adata):
+    # Define a variable that stores proximal and distal labels
+    adata.obs['prox_dist'] = ['Distal' if reg == 'Il' else 'Proximal' for reg in adata.obs['region']]
+    sc.tl.embedding_density(adata, basis='umap', groupby='prox_dist')
+
+    adata.obs['prox_dist'].value_counts()
+    sc.pl.embedding_density(adata, basis='umap', key='umap_density_prox_dist', group='Proximal')
+    sc.pl.embedding_density(adata, basis='umap', key='umap_density_prox_dist', group='Distal')
+
+
+def rajectory_inference():
+    adata.obs['louvain_final'].value_counts()
+
+    # Subsetting to relevant clusters
+    clusters_to_include = [g for g in adata.obs['louvain_final'].cat.categories if (
+                g.startswith('Enterocyte') or g.startswith('TA') or g.startswith('Stem') or g.startswith('EP'))]
+    adata_ent = adata[np.isin(adata.obs['louvain_final'], clusters_to_include), :].copy()
+
+    # Subset to highly variable genes
+    sc.pp.highly_variable_genes(adata_ent, flavor='cell_ranger', n_top_genes=4000, subset=True)
+
+    #Recalculating PCA for subset
+    sc.pp.pca(adata_ent, svd_solver='arpack')
+    sc.pl.pca(adata_ent)
+    sc.pl.pca_variance_ratio(adata_ent)
+
+    adata_ent.obsm['X_pca'] = adata_ent.obsm['X_pca'][:, 0:7]
+
+
+# in [78]或者3.5.1 Slingshot 以后未测试
+#
 
 
 
@@ -447,6 +521,8 @@ def main():
     # cell_cycle_scoring(adata,cc_genes_file)
     # to_clustering(adata)
 
+    # 数据输出
+    # adata.write('../data/Haber-et-al_mouse-intestinal-epithelium/Haber_et_al_case_study.h5ad')
 
 if __name__ == '__main__':
     import warnings
